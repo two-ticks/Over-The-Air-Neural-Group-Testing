@@ -26,14 +26,21 @@ your own site.
 
 ### One-time
 
-1. **Substitute placeholders.** Each `.slurm` file has these fields you
-   must edit:
-   - `#SBATCH --account=<YOUR_ACCOUNT>` → your cluster's billing/SU
-     account (TAMU users: `myproject` on a login node)
-   - `#SBATCH --mail-user=<YOUR_EMAIL>` → for `--mail-type=ALL` notifications
+1. **Substitute placeholders.** The slurm files come with most of the
+   user-specific bits already commented out as opt-in fallbacks:
    - The `cd $SCRATCH/<REPO_DIR>` line — match where you cloned the repo
      (`$SCRATCH` is the typical TAMU/SLURM convention; on other sites it
-     may be `$WORK`, `$STORAGE`, or just `~/`)
+     may be `$WORK`, `$STORAGE`, or just `~/`).
+   - **`#SBATCH --account=...` is not set by default.** Most users with
+     a single SU allocation will have slurm pick it automatically.
+     Uncomment the `##SBATCH --account=<YOUR_ACCOUNT>` fallback line if
+     `sbatch` rejects with "no account specified" or you have multiple
+     allocations to choose from. Find your account with `myproject`
+     (TAMU) or `sacctmgr show user $USER` (generic).
+   - **Email notifications are off by default.** Slurm sends no mail
+     unless `--mail-type` is set. If you do want notifications,
+     uncomment both `##SBATCH --mail-type=ALL` and
+     `##SBATCH --mail-user=<YOUR_EMAIL>` fallback lines.
 
 2. **Verify the module names.** The slurm files load
    `Anaconda3/2024.06`, `CUDA/12.4.0`, and (optionally) `WebProxy`. These

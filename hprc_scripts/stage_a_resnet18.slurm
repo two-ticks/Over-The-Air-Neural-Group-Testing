@@ -14,16 +14,19 @@
 #SBATCH --gres=gpu:a100:1
 #SBATCH --partition=gpu
 
-# --- USER-SPECIFIC: edit these before submitting ---
-#SBATCH --account=<YOUR_ACCOUNT>
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=<YOUR_EMAIL>
+# --- USER-SPECIFIC ---
 #SBATCH --output=Trained_Models/StageA_ITIT_ResNet18/slurm_%j.out
+# Uncomment + set if your cluster requires explicit account billing
+# (e.g. you have multiple SU allocations, or sbatch rejects with "no account specified"):
+##SBATCH --account=<YOUR_ACCOUNT>
+# Uncomment + set if you want email notifications on job state changes:
+##SBATCH --mail-type=ALL
+##SBATCH --mail-user=<YOUR_EMAIL>
 # --- end USER-SPECIFIC ---
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-NeuralGroupTesting}"     # name of repo dir under your storage root
+REPO_DIR="${REPO_DIR:-Over-The-Air-Neural-Group-Testing}"     # name of repo dir under your storage root
 ENV_NAME="${ENV_NAME:-ngt_env_modern}"
 MODULE_CONDA="${MODULE_CONDA:-Anaconda3/2024.06}"
 MODULE_CUDA="${MODULE_CUDA:-CUDA/12.4.0}"
@@ -31,20 +34,13 @@ STORAGE_ROOT="${STORAGE_ROOT:-$SCRATCH}"       # $SCRATCH on TAMU; $WORK / $HOME
 
 cd "$STORAGE_ROOT/$REPO_DIR"
 
-module purge
-module load "$MODULE_CONDA"
-module load "$MODULE_CUDA"
+ml purge
+ml WebProxy 2>/dev/null || true   # may not exist on non-TAMU clusters; ignore failure
+ml "$MODULE_CUDA"
+ml "$MODULE_CONDA"
 
-# Optional outbound HTTP proxy. Set HTTP_PROXY/HTTPS_PROXY in your
-# environment before sbatch if your cluster requires it (and add
-# `module load WebProxy` or equivalent above). Leave unset on sites with
-# direct internet.
-if [[ -n "${HTTP_PROXY:-}" ]]; then
-    export http_proxy="$HTTP_PROXY"
-    export https_proxy="${HTTPS_PROXY:-$HTTP_PROXY}"
-fi
-
-source activate "$ENV_NAME"
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$ENV_NAME"
 
 mkdir -p Trained_Models/StageA_ITIT_ResNet18
 
