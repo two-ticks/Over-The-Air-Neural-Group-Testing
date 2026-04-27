@@ -56,7 +56,7 @@ your own site.
    `7110`; if you submit two Stage A jobs that may land on the same node,
    change one.
 
-4. **Run `env_setup.sh` once.** Creates the `ngt_env_modern` conda env on
+4. **Run `env_setup.sh` once.** Creates the `ngt_env` conda env on
    your storage. The privacy package needs torch 2.6+ (the committed
    `requirements.{txt,yml}` files are for the older 1.8.1 codebase and
    are stale for the current code path).
@@ -80,7 +80,7 @@ your own site.
    srun --time=00:30:00 --cpus-per-task=8 --mem=32G \
         --gres=gpu:a100:1 --partition=gpu --pty bash
    module load CUDA/12.9.0 Anaconda3/2024.02-1   # adjust to your cluster
-   source activate ngt_env_modern
+   source activate ngt_env
    cd $SCRATCH/<REPO_DIR>
    pytest tests/ -v -m "not slow"
    ```
@@ -137,11 +137,51 @@ backed up, split into three λ-specific jobs (one per λ) — finishes in
 
 ---
 
+## Building `imagenet.sqsh`
+
+Run `build_imagenet_squashfs.sh` on an **interactive compute node** (not
+a login node — extraction is heavy IO):
+
+```bash
+srun --time=02:00:00 --nodes=1 --ntasks-per-node=1 --cpus-per-task=8 \
+     --mem=32G --partition=gpu --pty bash
+bash $SCRATCH/Over-The-Air-Neural-Group-Testing/hprc_scripts/build_imagenet_squashfs.sh
+```
+
+**Do not override `WORK_DIR` to a `$SCRATCH` path.** The script defaults
+`WORK_DIR` to `$TMPDIR` (e.g. `/tmp/job.<jobid>`) which on Grace A100
+nodes is a ~1.5 TB NVMe drive with no inode quota. `$SCRATCH` (Lustre)
+has a 250k-file inode limit; ImageNet contains ~1.28 M files, so
+extraction to Lustre always fails. The error from `tar` reads "Disk quota
+exceeded" but the root cause is the inode count, not disk space.
+
+**Compressor must be one Grace's `mksquashfs` supports.** The script
+defaults to `lz4`. Grace's squashfs-tools do not include `zstd`; available
+compressors are `gzip` (default upstream), `lzma`, `lzo`, `lz4`, `xz`.
+`lz4` is preferred: JPEGs are already compressed so ratio differences are
+negligible, and lz4 decompresses fastest during training IO. If the
+`mksquashfs` step fails mid-run (after extraction completes), run it
+directly on the already-extracted directory to avoid re-extracting:
+
+```bash
+mksquashfs /tmp/job.<JOBID>/imagenet_build_<PID>/imagenet \
+    $SCRATCH/imagenet.sqsh -comp lz4 -no-progress -noappend
+```
+
+On Grace, `$TMPDIR` is set automatically by SLURM to
+`/tmp/job.<SLURM_JOB_ID>`. Always confirm before running:
+
+```bash
+echo "TMPDIR=$TMPDIR"
+df -h "$TMPDIR"   # should show /dev/mapper/nvme-* with ~1.5T free
+```
+
+---
+
 ## Caveats
 
-- `env_setup.sh` pins `torch==2.6.0+cu124`. If your cluster's CUDA
-  modules move to a newer version, adjust the wheel index URL — the rest
-  of the env spec should still apply.
+- `env_setup.sh` pins torch to the cu128 wheel index. If your cluster's
+  CUDA modules change, adjust the `--index-url` in the pip install line.
 - `ce_sweep.slurm` is a single serial job. To split across three jobs
   for faster wall clock, copy it three times and edit the `LAMS` line in
   each.

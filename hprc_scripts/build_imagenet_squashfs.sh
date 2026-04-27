@@ -21,7 +21,7 @@ set -euo pipefail
 TAR_SRC="${TAR_SRC:-/scratch/data/imagenet_prepared.tar}"
 SQSHFS_DST="${SQSHFS_DST:-$SCRATCH/imagenet.sqsh}"
 WORK_DIR="${WORK_DIR:-${TMPDIR:-/tmp}/imagenet_build_$$}"
-COMPRESS="${COMPRESS:-zstd}"
+COMPRESS="${COMPRESS:-lz4}"
 COMPRESS_LEVEL="${COMPRESS_LEVEL:-9}"
 
 # --- pre-flight ---
