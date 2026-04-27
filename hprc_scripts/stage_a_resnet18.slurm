@@ -27,7 +27,7 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-Over-The-Air-Neural-Group-Testing}"     # name of repo dir under your storage root
-ENV_NAME="${ENV_NAME:-ngt_env_modern}"
+ENV_NAME="${ENV_NAME:-ngt_env}"
 MODULE_CONDA="${MODULE_CONDA:-Anaconda3/2024.02-1}"
 MODULE_CUDA="${MODULE_CUDA:-CUDA/12.9.0}"
 STORAGE_ROOT="${STORAGE_ROOT:-$SCRATCH}"       # $SCRATCH on TAMU; $WORK / $HOME on others
