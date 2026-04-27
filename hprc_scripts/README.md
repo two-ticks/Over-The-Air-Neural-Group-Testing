@@ -43,10 +43,12 @@ your own site.
      `##SBATCH --mail-user=<YOUR_EMAIL>` fallback lines.
 
 2. **Verify the module names.** The slurm files load
-   `Anaconda3/2024.06`, `CUDA/12.4.0`, and (optionally) `WebProxy`. These
-   are TAMU LMOD names; on other sites the modules may be named
-   differently (e.g. `anaconda3`, `cuda/12.4`). Check with
-   `module avail` on a login node and edit the `module load` lines.
+   `Anaconda3/2024.02-1`, `CUDA/12.9.0`, and (optionally) `WebProxy`.
+   These are TAMU Grace LMOD names as of 2026-04; on other sites or if
+   Grace updates its modules they may be named differently. Check with
+   `module avail Anaconda` and `module avail CUDA` on a login node and
+   override via `MODULE_CONDA=...` / `MODULE_CUDA=...` at submission, or
+   edit the defaults in the slurm files.
 
 3. **Pick a `--dist-url` port.** Each Stage A slurm submission needs a
    unique loopback port (`tcp://127.0.0.1:<port>`) — see `gotchas.md` →
@@ -77,7 +79,7 @@ your own site.
    ```bash
    srun --time=00:30:00 --cpus-per-task=8 --mem=32G \
         --gres=gpu:a100:1 --partition=gpu --pty bash
-   module load CUDA/12.4.0 Anaconda3/2024.06   # adjust to your cluster
+   module load CUDA/12.9.0 Anaconda3/2024.02-1   # adjust to your cluster
    source activate ngt_env_modern
    cd $SCRATCH/<REPO_DIR>
    pytest tests/ -v -m "not slow"

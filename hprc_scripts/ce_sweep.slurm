@@ -30,8 +30,8 @@ set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-Over-The-Air-Neural-Group-Testing}"
 ENV_NAME="${ENV_NAME:-ngt_env_modern}"
-MODULE_CONDA="${MODULE_CONDA:-Anaconda3/2024.06}"
-MODULE_CUDA="${MODULE_CUDA:-CUDA/12.4.0}"
+MODULE_CONDA="${MODULE_CONDA:-Anaconda3/2024.02-1}"
+MODULE_CUDA="${MODULE_CUDA:-CUDA/12.9.0}"
 STORAGE_ROOT="${STORAGE_ROOT:-$SCRATCH}"       # $SCRATCH on TAMU; $WORK / $HOME on others
 
 cd "$STORAGE_ROOT/$REPO_DIR"
