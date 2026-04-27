@@ -40,14 +40,18 @@ ml "$MODULE_CUDA"
 ml "$MODULE_CONDA"
 
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "$ENV_NAME"
+ENV_PREFIX="${ENV_PREFIX:-${SCRATCH:-/scratch/user/$USER}/conda_envs/${ENV_NAME}}"
+if [[ -d "$ENV_PREFIX" ]]; then
+    conda activate "$ENV_PREFIX"
+else
+    conda activate ngt_env
+fi
 
 # `conda activate` ignores `set -e` when the env is missing — falls back to
 # base python silently. Force-fail if torch isn't actually importable.
 python -c "import torch, torchvision" || {
-    echo "FATAL: torch/torchvision not importable in env '$ENV_NAME'." >&2
-    echo "       conda activate may have silently fallen through to base." >&2
-    echo "       Check: conda env list   (and pass ENV_NAME=<your_env> to sbatch)" >&2
+    echo "FATAL: torch/torchvision not importable in env '$ENV_NAME' (prefix: $ENV_PREFIX)." >&2
+    echo "       Check: conda env list   (and set ENV_NAME=<your_env> or ENV_PREFIX=<full_path>)" >&2
     exit 1
 }
 

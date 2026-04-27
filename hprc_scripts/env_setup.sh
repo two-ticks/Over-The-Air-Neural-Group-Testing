@@ -20,15 +20,14 @@ conda config --add envs_dirs $SCRATCH/conda_envs
 
 rm -rf ~/.local/lib/python3.11/site-packages/torch*
 
-conda env remove -n ngt_env_modern -y
-conda create -n ngt_env_modern python=3.11 -y
+conda env remove -n ngt_env -y
+conda create -n ngt_env python=3.11 -y
 source $(conda info --base)/etc/profile.d/conda.sh
-conda activate ngt_env_modern
-
-mkdir -p $SCRATCH/conda_envs/ngt_env_modern/etc/conda/activate.d
-cat << 'EOF' > $SCRATCH/conda_envs/ngt_env_modern/etc/conda/activate.d/env_vars.sh
+conda activate ngt_env
+mkdir -p $SCRATCH/conda_envs/ngt_env/etc/conda/activate.d
+cat << 'EOF' > $SCRATCH/conda_envs/ngt_env/etc/conda/activate.d/env_vars.sh
 export PYTHONNOUSERSITE=1
 EOF
 
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-pip install numpy pillow scikit-learn matplotlib pandas tqdm pytest
+pip install numpy pillow scikit-learn matplotlib pandas tqdm pytest tensorboard
