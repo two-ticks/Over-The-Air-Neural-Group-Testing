@@ -57,6 +57,13 @@ python -c "import torch, torchvision" || {
 
 mkdir -p Trained_Models/StageA_ITIT_ResNet18
 
+# Mount ImageNet squashfs so GroupTestingDataset symlinks resolve.
+SQSH="${SCRATCH}/imagenet.sqsh"
+IMGNET_MNT="${SCRATCH}/imagenet_mnt"
+mkdir -p "$IMGNET_MNT"
+squashfuse "$SQSH" "$IMGNET_MNT"
+trap "fusermount -u '$IMGNET_MNT' 2>/dev/null || true" EXIT
+
 nvidia-smi
 
 CUDA_VISIBLE_DEVICES=0 python -u main.py \

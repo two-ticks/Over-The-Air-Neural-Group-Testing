@@ -60,11 +60,7 @@ for task_idx, task in enumerate(task_list):
     print(f"mkdir -p {GROUP_TESTING_DATASET_PATH}/{task_idx}/train/")
     print(f"mkdir -p {GROUP_TESTING_DATASET_PATH}/{task_idx}/val/")
     for class_str in task:
-        #print(f"ln -s {IMAGE_NET_PATH}/train/{class_str}  {GROUP_TESTING_DATASET_PATH}/{task_idx}/train/{class_str}")
-        #print(f"ln -s {IMAGE_NET_PATH}/val/{class_str}  {GROUP_TESTING_DATASET_PATH}/{task_idx}/val/{class_str}")
-        #print(f"mkdir -p  {GROUP_TESTING_DATASET_PATH}/{task_idx}/train/{class_str}")
-        print(f"mv {IMAGE_NET_PATH}/train/{class_str}/  {GROUP_TESTING_DATASET_PATH}/{task_idx}/train/{class_str}")
-        #print(f"mkdir -p  {GROUP_TESTING_DATASET_PATH}/{task_idx}/val/{class_str}")
-        print(f"mv {IMAGE_NET_PATH}/val/{class_str}/  {GROUP_TESTING_DATASET_PATH}/{task_idx}/val/{class_str}")
+        print(f"ln -sfn $(realpath {IMAGE_NET_PATH}/train/{class_str})  {GROUP_TESTING_DATASET_PATH}/{task_idx}/train/{class_str}")
+        print(f"ln -sfn $(realpath {IMAGE_NET_PATH}/val/{class_str})    {GROUP_TESTING_DATASET_PATH}/{task_idx}/val/{class_str}")
     pass
 

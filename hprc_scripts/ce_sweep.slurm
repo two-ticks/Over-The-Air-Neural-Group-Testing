@@ -59,6 +59,13 @@ python -c "import torch, torchvision" || {
 
 mkdir -p Trained_Models/CE_Sweep
 
+# Mount ImageNet squashfs so GroupTestingDataset symlinks resolve.
+SQSH="${SCRATCH}/imagenet.sqsh"
+IMGNET_MNT="${SCRATCH}/imagenet_mnt"
+mkdir -p "$IMGNET_MNT"
+squashfuse "$SQSH" "$IMGNET_MNT"
+trap "fusermount -u '$IMGNET_MNT' 2>/dev/null || true" EXIT
+
 # Sweep parameters (override via env if you want fewer epochs for a
 # smoke test, e.g. STAGE_B_EPOCHS=1 STAGE_C_EPOCHS=1 LAMS=0.1 sbatch ...)
 DATA="${DATA:-data/GroupTestingDataset}"
