@@ -73,7 +73,8 @@ echo "[3/5] Building squashfs ($COMPRESS) -> $SQSHFS_DST"
 echo "    this takes 20-40 minutes; lots of small files to compress"
 
 mkdir -p "$(dirname "$SQSHFS_DST")"
-mksquashfs "$WORK_DIR/imagenet" "$SQSHFS_DST" -comp "$COMPRESS" -noappend
+NPROC="${NPROC:-${SLURM_CPUS_PER_TASK:-8}}"
+mksquashfs "$WORK_DIR/imagenet" "$SQSHFS_DST" -comp "$COMPRESS" -processors "$NPROC" -noappend
 
 # --- verify ---
 echo "[4/5] Verifying squashfs"
