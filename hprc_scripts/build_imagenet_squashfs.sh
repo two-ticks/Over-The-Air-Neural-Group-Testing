@@ -76,7 +76,7 @@ echo "    this takes 20-40 minutes; lots of small files to compress"
 mkdir -p "$(dirname "$SQSHFS_DST")"
 # -no-progress for cleaner output in slurm logs; remove if you want a progress bar
 mksquashfs "$WORK_DIR/imagenet" "$SQSHFS_DST" \
-    -comp "$COMPRESS" -Xcompression-level "$COMPRESS_LEVEL" \
+    -comp "$COMPRESS" \
     -no-progress -noappend
 
 # --- verify ---
