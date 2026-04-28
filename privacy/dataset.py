@@ -24,7 +24,11 @@ class PrivacyTaskCoalitionDataset(torch.utils.data.Dataset):
     """
 
     def __init__(self, dataset_list: List[datasets.ImageFolder], args, split: str,
-                 wnid_to_imagenet_idx=None):
+                 wnid_to_imagenet_idx=None, background_only: bool = False):
+        """If `background_only=True`, the firearm (positive) samples are dropped
+        from the dataset entirely — the mixing slot becomes background-only.
+        This is the threat-model setting for the Stage C honest-leakage adversary,
+        which should never see firearm-labeled images."""
         assert split in ("train", "val")
 
         first = dataset_list[0]
@@ -32,13 +36,15 @@ class PrivacyTaskCoalitionDataset(torch.utils.data.Dataset):
         self.transform = first.transform
         assert first.target_transform is None, "PrivacyTaskCoalitionDataset assumes target_transform is None"
         self.args = args
+        self.background_only = background_only
 
         # Build (or accept) the global wnid -> imagenet index mapping.
         if wnid_to_imagenet_idx is not None:
             self.wnid_to_imagenet_idx = wnid_to_imagenet_idx
             self.num_imagenet_classes = len(wnid_to_imagenet_idx)
         else:
-            all_wnids = sorted({wnid for ds in dataset_list for wnid in ds.class_to_idx.keys()})
+            wnid_sources = dataset_list[1:] if background_only else dataset_list
+            all_wnids = sorted({wnid for ds in wnid_sources for wnid in ds.class_to_idx.keys()})
             self.wnid_to_imagenet_idx = {w: i for i, w in enumerate(all_wnids)}
             self.num_imagenet_classes = len(all_wnids)
 
@@ -56,7 +62,11 @@ class PrivacyTaskCoalitionDataset(torch.utils.data.Dataset):
         negative_target = 0
         negative_data_list = [[s[0], negative_target] for s in negative_data_list]
 
-        mixing_data_list = positive_data_list + negative_data_list
+        if background_only:
+            # Drop positives — adversary's data must not contain firearm samples.
+            mixing_data_list = list(negative_data_list)
+        else:
+            mixing_data_list = positive_data_list + negative_data_list
         if split != "val":
             mixing_data_list = list(np.random.permutation(mixing_data_list))
 

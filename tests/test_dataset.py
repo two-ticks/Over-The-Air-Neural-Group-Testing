@@ -107,3 +107,49 @@ def test_dataset_uses_provided_wnid_mapping(synthetic_dataset):
     # Every item's imagenet label must fall in the shifted range.
     _, _, imagenet_targets = ds[0]
     assert imagenet_targets[0].item() >= 100
+
+
+def test_background_only_drops_firearm_samples(synthetic_dataset):
+    """background_only=True must drop all firearm (positive) samples; firearm_target is always 0."""
+    args = _build_args(synthetic_dataset, background_K=0)
+    dl = _build_dataset_list(synthetic_dataset)
+    ds = PrivacyTaskCoalitionDataset(dl, args, split="train", background_only=True)
+
+    targets = {ds[i][1] for i in range(len(ds))}
+    assert targets == {0}, f"background_only dataset should yield only firearm_target=0, got {targets}"
+
+    firearm_wnids = set(dl[0].class_to_idx.keys())
+    for i in range(len(ds)):
+        path = ds.dataset_samples[0][i][0]
+        wnid = Path(path).parent.name
+        assert wnid not in firearm_wnids, (
+            f"background_only dataset must not contain firearm wnid {wnid}"
+        )
+
+
+def test_background_only_default_mapping_excludes_firearm_wnids(synthetic_dataset):
+    """When background_only=True and no mapping is supplied, the auto-built
+    mapping must span only background wnids; num_imagenet_classes equals
+    the count of background classes (4 in the synthetic fixture)."""
+    args = _build_args(synthetic_dataset, background_K=0)
+    dl = _build_dataset_list(synthetic_dataset)
+    ds = PrivacyTaskCoalitionDataset(dl, args, split="train", background_only=True)
+
+    background_wnids = set(dl[1].class_to_idx.keys())
+    firearm_wnids = set(dl[0].class_to_idx.keys())
+    assert set(ds.wnid_to_imagenet_idx.keys()) == background_wnids
+    assert ds.num_imagenet_classes == len(background_wnids)
+    for fw in firearm_wnids:
+        assert fw not in ds.wnid_to_imagenet_idx
+
+
+def test_background_only_default_mode_unchanged(synthetic_dataset):
+    """Sanity: background_only defaults to False; original behavior is preserved."""
+    args = _build_args(synthetic_dataset, background_K=0)
+    dl = _build_dataset_list(synthetic_dataset)
+    ds_default = PrivacyTaskCoalitionDataset(dl, args, split="train")
+    ds_full = PrivacyTaskCoalitionDataset(dl, args, split="train", background_only=False)
+    # Both should include firearm samples (target=1) and have the full wnid mapping.
+    assert any(ds_default[i][1] == 1 for i in range(len(ds_default)))
+    assert any(ds_full[i][1] == 1 for i in range(len(ds_full)))
+    assert ds_default.num_imagenet_classes == ds_full.num_imagenet_classes

@@ -141,6 +141,10 @@ def stage_b_loop(backbone, adversary, train_dataset, val_dataset, args, device, 
         )
         t0 = time.time()
         for it, (images, firearm_target, imagenet_target_per_image) in enumerate(loader):
+            # Threat-model mask: only background (non-firearm) items contribute
+            # to the encoder's privacy loss; the firearm-vs-background signal is
+            # the receiver's legitimate output, not a privacy violation.
+            background_mask = (firearm_target == 0)
             metrics = stage_b_step(
                 backbone=backbone, adversary=adversary,
                 enc_optimizer=enc_optim, adv_optimizer=adv_optim,
@@ -149,6 +153,7 @@ def stage_b_loop(backbone, adversary, train_dataset, val_dataset, args, device, 
                 priv_loss_name=args.priv_loss, lam=args.lam, k_adv=args.k_adv,
                 device=device, gt_alg=args.GT_alg, background_K=args.background_K,
                 snr_noise_std=snr_noise,
+                background_mask=background_mask,
             )
             if it % args.print_freq == 0:
                 line = (f"[StageB][ep {epoch}][it {it:5d}] "

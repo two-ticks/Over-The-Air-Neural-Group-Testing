@@ -1,13 +1,14 @@
 #!/bin/bash
-# CE sweep (R1-R3) — adds the --priv-loss ce column to the existing
-# entropy results, mirroring the protocol from
-# docs/superpowers/results/2026-04-18-itit-resnet18-no-noise-results.md.
+# Entropy sweep (R1-R3) — re-runs the original --priv-loss entropy protocol from
+# docs/superpowers/results/2026-04-18-itit-resnet18-no-noise-results.md
+# under the corrected privacy package (firearm-filtered Stage C metric;
+# Stage B in-loop privacy loss masks firearm samples).
 #
 # Per lambda: Stage B (30ep) -> convert ckpt -> refresh (2ep) -> Stage C
 # (30ep) on both pre- and post-refresh checkpoints.
 # Wall: ~3.5h per lambda x 3 lambdas = ~11h on 1x A100. 12h budget.
 
-#SBATCH --job-name=NGT_CE_Sweep
+#SBATCH --job-name=NGT_Entropy_Sweep
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -17,7 +18,7 @@
 #SBATCH --partition=gpu
 
 # --- USER-SPECIFIC ---
-#SBATCH --output=Trained_Models/CE_Sweep/slurm_%j.out
+#SBATCH --output=Trained_Models/Entropy_Sweep/slurm_%j.out
 # Uncomment + set if your cluster requires explicit account billing
 # (e.g. you have multiple SU allocations, or sbatch rejects with "no account specified"):
 ##SBATCH --account=<YOUR_ACCOUNT>
@@ -57,7 +58,7 @@ python -c "import torch, torchvision" || {
     exit 1
 }
 
-mkdir -p Trained_Models/CE_Sweep
+mkdir -p Trained_Models/Entropy_Sweep
 
 # Mount ImageNet squashfs so GroupTestingDataset symlinks resolve.
 SQSH="${SCRATCH}/imagenet.sqsh"
@@ -76,7 +77,7 @@ STAGE_C_EPOCHS="${STAGE_C_EPOCHS:-30}"
 REFRESH_EPOCHS="${REFRESH_EPOCHS:-2}"
 REFRESH_LR="${REFRESH_LR:-0.0001}"
 LAMS="${LAMS:-0.1 0.3 1.0}"
-PRIV_LOSS="ce"
+PRIV_LOSS="entropy"
 
 if [[ ! -f "$STAGE_A_CKPT" ]]; then
     echo "FATAL: Stage A checkpoint not found at $STAGE_A_CKPT" >&2
@@ -86,7 +87,7 @@ fi
 
 nvidia-smi
 
-LOG="Trained_Models/CE_Sweep/sweep.log"
+LOG="Trained_Models/Entropy_Sweep/sweep.log"
 exec > >(tee -a "$LOG") 2>&1
 
 for LAM in $LAMS; do
@@ -159,12 +160,10 @@ for LAM in $LAMS; do
 done
 
 echo "=========================================="
-echo "All CE-sweep runs complete @ $(date)."
+echo "All entropy-sweep runs complete @ $(date)."
 echo "Leakage JSONs:"
-echo "  Trained_Models/StageC_OnStageB_ITIT_ResNet18_lam*_ce/leakage.json"
-echo "  Trained_Models/StageC_OnRefreshedB_lam*_ce/leakage.json"
+echo "  Trained_Models/StageC_OnStageB_ITIT_ResNet18_lam*_entropy/leakage.json"
+echo "  Trained_Models/StageC_OnRefreshedB_lam*_entropy/leakage.json"
 echo "Each contains 'top1_background_acc' (threat-model leakage)"
 echo "and 'top1_combined_acc' (legacy contaminated number) for auditability."
-echo "Also submit hprc_scripts/entropy_sweep.slurm for the apples-to-apples"
-echo "entropy-form comparison under the same corrected pipeline."
 echo "=========================================="

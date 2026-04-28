@@ -50,6 +50,9 @@ def get_parser():
     p.add_argument("--log-name", default="eval_c.log")
     p.add_argument("--print-freq", type=int, default=50)
     p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--save-adversary", action="store_true", default=True,
+                   help="Persist trained Stage C adversary so future re-evals are free.")
+    p.add_argument("--no-save-adversary", dest="save_adversary", action="store_false")
     return p
 
 
@@ -88,6 +91,23 @@ def load_backbone(args, device):
     return backbone, coded_pwr
 
 
+def _build_background_mask(firearm_target: torch.Tensor, K: int) -> torch.Tensor:
+    """Per-stacked-image background mask for ITIT.
+
+    Stacked-image layout per item: slot 0 is the mixing slot (firearm if
+    firearm_target==1, else background); slots 1..K-1 are always backgrounds
+    sampled from the negative pool. So slot 0 is firearm iff firearm_target==1;
+    every other slot is always a background.
+
+    Returns a (B, K) bool tensor; True means "this stacked image is a
+    background sample" (i.e., belongs to the threat-model adversary's
+    label space)."""
+    B = firearm_target.shape[0]
+    mask = torch.ones(B, K, dtype=torch.bool, device=firearm_target.device)
+    mask[:, 0] = firearm_target == 0
+    return mask
+
+
 def train_fresh_adversary(backbone, adversary, train_dataset, args, device, log, coded_pwr=1.0):
     snr_noise = snr_to_noise_std(args.SNR, args.GT_alg, coded_pwr)
     optim = torch.optim.SGD(adversary.parameters(), lr=args.adv_lr, momentum=args.momentum,
@@ -99,8 +119,9 @@ def train_fresh_adversary(backbone, adversary, train_dataset, args, device, log,
         )
         adversary.train()
         t0 = time.time()
-        for it, (images, _, imagenet_target_per_image) in enumerate(loader):
+        for it, (images, firearm_target, imagenet_target_per_image) in enumerate(loader):
             images = images.to(device); imagenet_target_per_image = imagenet_target_per_image.to(device)
+            firearm_target = firearm_target.to(device)
             with torch.no_grad():
                 pre = backbone.encode(images)
                 post, _, _ = backbone.channel(pre, noise_std=snr_noise,
@@ -109,13 +130,23 @@ def train_fresh_adversary(backbone, adversary, train_dataset, args, device, log,
                 B, K, Cf, Hf, Wf = pre.shape
                 adv_in = pre.reshape(B * K, Cf, Hf, Wf)
                 adv_target = imagenet_target_per_image.reshape(-1)
+                bg_mask_flat = _build_background_mask(firearm_target, K).reshape(-1)
+                if not bg_mask_flat.any():
+                    continue
+                adv_in = adv_in[bg_mask_flat]
+                adv_target = adv_target[bg_mask_flat]
                 logits = adversary(adv_in)
                 loss = F.cross_entropy(logits, adv_target)
             else:
                 num_classes = adversary.fc.out_features
-                khot = torch.zeros(images.size(0), num_classes, device=device).scatter_(
-                    1, imagenet_target_per_image, 1.0)
-                logits = adversary(post)
+                bg_item_mask = firearm_target == 0
+                if not bg_item_mask.any():
+                    continue
+                post_bg = post[bg_item_mask]
+                imagenet_targets_bg = imagenet_target_per_image[bg_item_mask]
+                khot = torch.zeros(post_bg.size(0), num_classes, device=device).scatter_(
+                    1, imagenet_targets_bg, 1.0)
+                logits = adversary(post_bg)
                 loss = F.binary_cross_entropy_with_logits(logits, khot)
             optim.zero_grad(set_to_none=True); loss.backward(); optim.step()
             if it % args.print_freq == 0:
@@ -126,18 +157,31 @@ def train_fresh_adversary(backbone, adversary, train_dataset, args, device, log,
 
 
 def evaluate_leakage(backbone, adversary, val_dataset, args, device, coded_pwr=1.0):
-    """Returns dict with leakage metrics on val set."""
+    """Returns dict with leakage metrics on val set.
+
+    Threat model: only background (non-firearm) samples count as leakage.
+    The firearm-vs-background classification is the receiver's legitimate,
+    intentionally-exposed output. We track three numbers for ITIT so the
+    contamination is auditable:
+
+    * `top1_background_acc` — the threat-model leakage metric.
+    * `top1_firearm_acc`    — adversary accuracy on firearm samples; should
+                              be high regardless of privacy training; informational only.
+    * `top1_combined_acc`   — legacy number (matches the pre-fix `top1_imagenet_acc`).
+    """
     snr_noise = snr_to_noise_std(args.SNR, args.GT_alg, coded_pwr)
     loader = torch.utils.data.DataLoader(
         val_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.val_workers, pin_memory=True, drop_last=False,
     )
     adversary.eval()
-    correct = total = 0
-    all_logits, all_targets = [], []
+    correct_bg = total_bg = 0
+    correct_fa = total_fa = 0
+    all_logits, all_targets, all_bg_item_masks = [], [], []
     with torch.no_grad():
-        for images, _, imagenet_target_per_image in loader:
+        for images, firearm_target, imagenet_target_per_image in loader:
             images = images.to(device); imagenet_target_per_image = imagenet_target_per_image.to(device)
+            firearm_target = firearm_target.to(device)
             pre = backbone.encode(images)
             post, _, _ = backbone.channel(pre, noise_std=snr_noise,
                                           gpu=device.index if device.type == "cuda" else None)
@@ -145,10 +189,15 @@ def evaluate_leakage(backbone, adversary, val_dataset, args, device, coded_pwr=1
                 B, K, Cf, Hf, Wf = pre.shape
                 adv_in = pre.reshape(B * K, Cf, Hf, Wf)
                 adv_target = imagenet_target_per_image.reshape(-1)
+                bg_mask_flat = _build_background_mask(firearm_target, K).reshape(-1)
+                fa_mask_flat = ~bg_mask_flat
                 logits = adversary(adv_in)
                 pred = logits.argmax(dim=-1)
-                correct += (pred == adv_target).sum().item()
-                total += adv_target.numel()
+                hits = (pred == adv_target)
+                correct_bg += (hits & bg_mask_flat).sum().item()
+                total_bg += bg_mask_flat.sum().item()
+                correct_fa += (hits & fa_mask_flat).sum().item()
+                total_fa += fa_mask_flat.sum().item()
             else:
                 logits = adversary(post)
                 all_logits.append(logits.cpu().numpy())
@@ -156,21 +205,53 @@ def evaluate_leakage(backbone, adversary, val_dataset, args, device, coded_pwr=1
                 khot = torch.zeros(images.size(0), num_classes, device=device).scatter_(
                     1, imagenet_target_per_image, 1.0)
                 all_targets.append(khot.cpu().numpy())
+                all_bg_item_masks.append((firearm_target == 0).cpu().numpy())
 
     if args.GT_alg == 1:
-        return {"top1_imagenet_acc": correct / max(total, 1)}
+        total_combined = total_bg + total_fa
+        correct_combined = correct_bg + correct_fa
+        return {
+            "top1_background_acc": correct_bg / max(total_bg, 1),
+            "top1_firearm_acc": correct_fa / max(total_fa, 1),
+            "top1_combined_acc": correct_combined / max(total_combined, 1),
+            "n_background_eval": total_bg,
+            "n_firearm_eval": total_fa,
+            "n_combined_eval": total_combined,
+            # Legacy key — same value as top1_combined_acc, kept so existing
+            # downstream tooling doesn't break.
+            "top1_imagenet_acc": correct_combined / max(total_combined, 1),
+        }
 
-    # GTGT-FM: per-class AUC + mAP
+    # GTGT-FM: per-class AUC + mAP. Compute combined (legacy) and background-only.
     from sklearn.metrics import roc_auc_score, average_precision_score
-    logits = np.concatenate(all_logits, axis=0); targets = np.concatenate(all_targets, axis=0)
-    aucs, aps = [], []
-    for k in range(targets.shape[1]):
-        if targets[:, k].sum() == 0:
-            continue  # class never appeared in val
-        aucs.append(roc_auc_score(targets[:, k], logits[:, k]))
-        aps.append(average_precision_score(targets[:, k], logits[:, k]))
-    return {"mean_auc": float(np.mean(aucs)), "mean_ap": float(np.mean(aps)),
-            "num_classes_evaluated": len(aucs)}
+    logits = np.concatenate(all_logits, axis=0)
+    targets = np.concatenate(all_targets, axis=0)
+    bg_item_mask = np.concatenate(all_bg_item_masks, axis=0).astype(bool)
+
+    def _per_class_aucs(logits_arr, targets_arr):
+        aucs, aps = [], []
+        for k in range(targets_arr.shape[1]):
+            if targets_arr[:, k].sum() == 0:
+                continue
+            aucs.append(roc_auc_score(targets_arr[:, k], logits_arr[:, k]))
+            aps.append(average_precision_score(targets_arr[:, k], logits_arr[:, k]))
+        return aucs, aps
+
+    aucs_combined, aps_combined = _per_class_aucs(logits, targets)
+    aucs_bg, aps_bg = _per_class_aucs(logits[bg_item_mask], targets[bg_item_mask])
+    return {
+        "mean_auc_background": float(np.mean(aucs_bg)) if aucs_bg else float("nan"),
+        "mean_ap_background": float(np.mean(aps_bg)) if aps_bg else float("nan"),
+        "n_classes_evaluated_background": len(aucs_bg),
+        "n_background_items": int(bg_item_mask.sum()),
+        "mean_auc_combined": float(np.mean(aucs_combined)) if aucs_combined else float("nan"),
+        "mean_ap_combined": float(np.mean(aps_combined)) if aps_combined else float("nan"),
+        "n_classes_evaluated_combined": len(aucs_combined),
+        # Legacy keys.
+        "mean_auc": float(np.mean(aucs_combined)) if aucs_combined else float("nan"),
+        "mean_ap": float(np.mean(aps_combined)) if aps_combined else float("nan"),
+        "num_classes_evaluated": len(aucs_combined),
+    }
 
 
 def main():
@@ -186,14 +267,24 @@ def main():
     backbone, coded_pwr = load_backbone(args, device)
     train_list, val_list = build_datasets(args)
 
-    # Build a unified wnid mapping from both train and val to avoid label-space divergence (I2).
-    all_wnids = sorted(set().union(*(ds.class_to_idx.keys() for ds in train_list + val_list)))
-    wnid_to_imagenet_idx = {w: i for i, w in enumerate(all_wnids)}
+    # Threat-model mapping: only background wnids are in the adversary's label space.
+    # Firearm (folder 0) is the receiver's intentionally-exposed output; an attacker
+    # learning "this is a firearm" is by design, not a privacy violation. The Stage C
+    # adversary must therefore never see firearm samples and never have firearm wnids
+    # as candidate predictions.
+    background_train_list = train_list[1:]
+    background_val_list = val_list[1:]
+    bg_wnids = sorted(set().union(
+        *(ds.class_to_idx.keys() for ds in background_train_list + background_val_list)
+    ))
+    wnid_to_imagenet_idx = {w: i for i, w in enumerate(bg_wnids)}
 
     train_dataset = PrivacyTaskCoalitionDataset(train_list, args, split="train",
-                                                wnid_to_imagenet_idx=wnid_to_imagenet_idx)
+                                                wnid_to_imagenet_idx=wnid_to_imagenet_idx,
+                                                background_only=True)
     val_dataset = PrivacyTaskCoalitionDataset(val_list, args, split="val",
-                                              wnid_to_imagenet_idx=wnid_to_imagenet_idx)
+                                              wnid_to_imagenet_idx=wnid_to_imagenet_idx,
+                                              background_only=True)
 
     adversary = AdversaryHead(arch_name=args.arch, num_classes=train_dataset.num_imagenet_classes).to(device)
 
@@ -204,6 +295,17 @@ def main():
     log.write("leakage: " + json.dumps(metrics) + "\n"); log.flush()
     with open(os.path.join(args.output_dir, "leakage.json"), "w") as f:
         json.dump(metrics, f, indent=2)
+
+    if args.save_adversary:
+        ckpt_path = os.path.join(args.output_dir, "adversary.pth.tar")
+        torch.save({
+            "state_dict_adversary": adversary.state_dict(),
+            "arch_name": args.arch,
+            "num_classes": train_dataset.num_imagenet_classes,
+            "GT_alg": args.GT_alg,
+            "stage_b_ckpt": args.stage_b_ckpt,
+        }, ckpt_path)
+        log.write(f"saved adversary to {ckpt_path}\n"); log.flush()
     log.close()
 
 

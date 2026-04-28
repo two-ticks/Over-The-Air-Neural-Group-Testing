@@ -5,6 +5,8 @@ The `backbone` is a `ResNet_GT` (or `ResNet_GT_phase`) instance. Stage-B contrac
   * receiver layers (layer3, layer4, fc) — FROZEN, no gradient
   * adversary head — TRAIN, separately (inner loop), gradient from CE/BCE on intercepted features
 """
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -49,6 +51,7 @@ def stage_b_step(
     gt_alg: int,                           # 1 (ITIT) or 2 (GTGT-FM)
     background_K: int,                     # group_size - 1
     snr_noise_std,                         # float or None
+    background_mask: Optional[torch.Tensor] = None,  # (B,) bool; True = "this item is background-only"
 ):
     """One Stage-B iteration on a minibatch. Returns a metrics dict.
 
@@ -56,6 +59,13 @@ def stage_b_step(
       * Updates `adversary` parameters via `adv_optimizer` (k_adv steps).
       * Updates encoder params via `enc_optimizer` (1 step).
       * Receiver params are NOT updated (frozen by design).
+
+    `background_mask` (optional, shape `(B,)` bool) implements the threat-model
+    fix: when provided, the privacy term in the encoder's outer step is
+    computed only over items where the mask is True (i.e., non-firearm items).
+    The inner adversary loop is intentionally NOT masked — we want a strong
+    attacker that has seen the full feature distribution; we only filter what
+    the encoder is penalized for. If None, full batch is used (legacy behavior).
     """
     assert priv_loss_name in ("ce", "entropy"), f"priv_loss_name must be 'ce' or 'entropy', got {priv_loss_name!r}"
     assert gt_alg in (1, 2), f"only ITIT (1) and GTGT-FM (2) are supported in Stage B; got {gt_alg}"
@@ -66,6 +76,8 @@ def stage_b_step(
     images = images.to(device)
     firearm_target = firearm_target.to(device)
     imagenet_target_per_image = imagenet_target_per_image.to(device)
+    if background_mask is not None:
+        background_mask = background_mask.to(device)
 
     # --- Adversary inner loop (TTUR): k_adv steps on the same minibatch ---
     backbone.eval()
@@ -131,16 +143,34 @@ def stage_b_step(
     if gt_alg == 1:
         B, K, Cf, Hf, Wf = pre.shape
         adv_input2 = pre.reshape(B * K, Cf, Hf, Wf)
-        adv_logits2 = adversary(adv_input2)
-        if priv_loss_name == "ce":
-            loss_priv = priv_loss_ce(adv_logits2, adv_target_flat)
+        priv_target = adv_target_flat
+        if background_mask is not None:
+            # Per-stacked-image mask: slot 0 follows background_mask, slots 1..K-1
+            # are always backgrounds (sampled from negative pool by construction).
+            per_img_mask = torch.ones(B, K, dtype=torch.bool, device=device)
+            per_img_mask[:, 0] = background_mask
+            per_img_mask = per_img_mask.reshape(-1)
+            adv_input2 = adv_input2[per_img_mask]
+            priv_target = priv_target[per_img_mask]
+        adv_logits2 = adversary(adv_input2) if adv_input2.numel() > 0 else None
+        if adv_logits2 is None or adv_logits2.shape[0] == 0:
+            loss_priv = torch.zeros((), device=device)
+        elif priv_loss_name == "ce":
+            loss_priv = priv_loss_ce(adv_logits2, priv_target)
         else:
             loss_priv = priv_loss_entropy(adv_logits2)
     else:
-        adv_logits2 = adversary(post_channel)
-        if priv_loss_name == "ce":
+        post_for_priv = post_channel
+        khot_for_priv = adv_target_khot
+        if background_mask is not None:
+            post_for_priv = post_for_priv[background_mask]
+            khot_for_priv = khot_for_priv[background_mask]
+        adv_logits2 = adversary(post_for_priv) if post_for_priv.shape[0] > 0 else None
+        if adv_logits2 is None or adv_logits2.shape[0] == 0:
+            loss_priv = torch.zeros((), device=device)
+        elif priv_loss_name == "ce":
             # CE form for multilabel: -BCE
-            loss_priv = -F.binary_cross_entropy_with_logits(adv_logits2, adv_target_khot)
+            loss_priv = -F.binary_cross_entropy_with_logits(adv_logits2, khot_for_priv)
         else:
             loss_priv = priv_loss_entropy_multilabel(adv_logits2)
 

@@ -5,6 +5,20 @@
 **Spec:** `docs/superpowers/specs/2026-04-17-privacy-preserving-ota-ngt-design.md`
 **Plan:** `docs/superpowers/plans/2026-04-17-privacy-preserving-ota-ngt.md`
 
+> **Superseded notice (2026-04-28):** The Stage C leakage numbers in this
+> document were computed before the firearm-filter fix in
+> `privacy/eval_privacy.py` and `privacy/trainer.py`. Both the in-loop
+> Stage B privacy loss and the Stage C eval included firearm-class
+> samples in the adversary's data, conflating the receiver's legitimate
+> firearm-vs-background output with actual privacy leakage. The 35%
+> baseline plateau is dominated by firearm-wnid classification accuracy,
+> not by background-class leakage. Re-run both `--priv-loss entropy`
+> and `--priv-loss ce` sweeps via `hprc_scripts/{entropy,ce}_sweep.slurm`
+> on the corrected pipeline; the new leakage JSONs include
+> `top1_background_acc` (threat-model leakage) and `top1_combined_acc`
+> (this doc's legacy number) side-by-side. Treat tables in §4 and §5
+> below as the *contaminated* numbers until the corrected sweep lands.
+
 ---
 
 ## Headline
@@ -141,7 +155,12 @@ The clean monotone pattern: as λ increases, Acc and AUC both drop, false-positi
 
 A fresh adversary head was trained from scratch (Kaiming init) for 30 epochs on intercepted features. The encoder is fully frozen (`requires_grad=False` on every param + eval mode) so BN running stats and weights don't drift during Stage C.
 
-**Reported metric**: top-1 accuracy of the fresh adversary on the 48k val set's per-image features. Random chance = 1/979 ≈ 0.1%.
+**Reported metric**: top-1 accuracy of the fresh adversary, computed on the 300-sample balanced val (150 firearm + 150 background) — *not* the 48k val set; that 48k figure refers to `main.py`'s utility-eval protocol and was incorrectly transcribed here. Random chance = 1/979 ≈ 0.1%.
+
+> **Note (2026-04-28):** the 35% values below are dominated by firearm-wnid
+> classification accuracy (not background leakage). Under the firearm-filtered
+> metric, `top1_background_acc` is the threat-model leakage number; see the
+> superseded notice at the top of this doc.
 
 | Stage B ckpt | Top-1 ImageNet leakage |
 |---|---|

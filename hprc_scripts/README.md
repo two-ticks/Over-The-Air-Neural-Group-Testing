@@ -18,6 +18,8 @@ your own site.
 | `env_setup.sh` | One-time login-node conda env creation. Run once per cluster account. |
 | `stage_a_resnet18.slurm` | Stage A utility pretrain (ResNet-18, ITIT, no noise). Skip if you already have `Trained_Models/StageA_ITIT_ResNet18/model_best.pth.tar`. |
 | `ce_sweep.slurm` | The R1–R3 sweep — `--priv-loss ce` at λ ∈ {0.1, 0.3, 1.0}, end-to-end (Stage B + 2-ep refresh + Stage C pre-/post-refresh). |
+| `entropy_sweep.slurm` | Same protocol as `ce_sweep.slurm` but with `--priv-loss entropy`. Run alongside the CE sweep for apples-to-apples comparison under the firearm-filtered Stage C metric. |
+| `sanity_check_eval.slurm` | Re-runs Stage C eval against existing Stage B + refreshed checkpoints, using the firearm-filtered metric in `privacy/eval_privacy.py`. Cheaper than re-running Stage B; produces `Trained_Models/StageC_*_sanity/leakage.json` with `top1_background_acc` (threat-model leakage) alongside the legacy `top1_combined_acc`. |
 | `convert_stage_b_to_main.py` | Renames `state_dict_backbone → state_dict` so a Stage B checkpoint can be passed to `main.py --resume` for the refresh step. |
 
 ---
@@ -96,13 +98,23 @@ bash hprc_scripts/env_setup.sh
 # (only if you don't already have a Stage A checkpoint):
 sbatch hprc_scripts/stage_a_resnet18.slurm
 
-# the actual experiment:
-sbatch hprc_scripts/ce_sweep.slurm
+# the actual experiment — submit immediately after Stage A, run when it finishes:
+STAGE_A_JOB=$(sbatch --parsable hprc_scripts/stage_a_resnet18.slurm)
+sbatch --dependency=afterok:$STAGE_A_JOB hprc_scripts/ce_sweep.slurm
+
+# or if you already submitted Stage A and have its job ID:
+sbatch --dependency=afterok:<stage_a_jobid> hprc_scripts/ce_sweep.slurm
 
 # monitor:
 squeue --me
 tail -f Trained_Models/CE_Sweep/sweep.log
 ```
+
+`--parsable` makes `sbatch` print only the job ID (no "Submitted batch job …" text), so
+it can be captured into a shell variable. `--dependency=afterok:<id>` holds the CE sweep
+in the queue until Stage A exits cleanly; SLURM cancels it automatically if Stage A
+fails. Use `afterany` instead of `afterok` to run the sweep regardless of Stage A's exit
+status.
 
 After the sweep finishes, the leakage numbers land in:
 
@@ -115,6 +127,13 @@ Compare against the entropy baseline at:
 
 ```
 docs/superpowers/results/2026-04-18-itit-resnet18-no-noise-results.md §3-5
+```
+
+To pull just the `leakage.json` files to your laptop (run from a local
+shell, not the login node):
+
+```bash
+rsync -avm --include='*/' --include='leakage.json' --exclude='*' <NETID>@grace.hprc.tamu.edu:/scratch/user/<NETID>/<REPO_DIR>/Trained_Models/ ./Trained_Models_leakage/
 ```
 
 ---

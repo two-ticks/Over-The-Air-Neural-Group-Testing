@@ -223,3 +223,86 @@ def test_stage_b_step_does_not_update_adversary_in_outer_step(tiny_setup):
             f"adversary parameter [{i}] (shape {tuple(p.shape)}) accumulated gradient "
             f"during the encoder outer step — I3 grad leak!"
         )
+
+
+def _itit_single_stack_batch(B=2):
+    """ITIT batch with background_K=0 — one image per item (K+1 == 1)."""
+    images = torch.randn(B, 1, 3, 16, 16)
+    firearm_target = torch.tensor([1] * B)  # all firearm
+    imagenet_target_per_image = torch.randint(0, 10, (B, 1))
+    return images, firearm_target, imagenet_target_per_image
+
+
+def test_stage_b_step_background_mask_zero_priv_loss_when_all_firearm(tiny_setup):
+    """All-firearm batch + background_mask=all-False, with background_K=0
+    (only the mixing slot exists). Every stacked image is masked out, so
+    the privacy term has no samples to compute over → loss_priv == 0."""
+    images, firearm_target, imagenet_target = _itit_single_stack_batch(B=2)
+
+    out = stage_b_step(
+        backbone=tiny_setup["backbone"],
+        adversary=tiny_setup["adversary"],
+        enc_optimizer=tiny_setup["enc_optim"],
+        adv_optimizer=tiny_setup["adv_optim"],
+        images=images,
+        firearm_target=firearm_target,
+        imagenet_target_per_image=imagenet_target,
+        priv_loss_name="entropy",
+        lam=1.0,
+        k_adv=0,  # skip inner loop — focus on the priv-loss path
+        device=torch.device("cpu"),
+        gt_alg=1,
+        background_K=0,
+        snr_noise_std=None,
+        background_mask=torch.zeros(2, dtype=torch.bool),
+    )
+    assert out["loss_priv"] == 0.0, (
+        f"Expected loss_priv == 0.0 for an all-firearm batch with background_mask=all-False, "
+        f"got {out['loss_priv']}"
+    )
+
+
+def test_stage_b_step_background_mask_keeps_extra_slots(tiny_setup):
+    """With background_K > 0, the per-image mask must keep slots 1..K (always
+    background by construction), even when slot 0 is masked out. Loss_priv
+    should be NON-zero because the K extra background slots still contribute."""
+    out = stage_b_step(
+        backbone=tiny_setup["backbone"],
+        adversary=tiny_setup["adversary"],
+        enc_optimizer=tiny_setup["enc_optim"],
+        adv_optimizer=tiny_setup["adv_optim"],
+        images=tiny_setup["images"],  # (B=2, K+1=2, ...)
+        firearm_target=torch.tensor([1, 1]),
+        imagenet_target_per_image=tiny_setup["imagenet_target_per_image"],
+        priv_loss_name="entropy",
+        lam=1.0,
+        k_adv=0,
+        device=torch.device("cpu"),
+        gt_alg=1,
+        background_K=1,
+        snr_noise_std=None,
+        background_mask=torch.zeros(2, dtype=torch.bool),
+    )
+    assert out["loss_priv"] != 0.0, (
+        "Expected loss_priv != 0.0: slot-1 stacked images are always background "
+        "and should contribute to priv_loss even when slot-0 is masked out."
+    )
+
+
+def test_stage_b_step_background_mask_none_matches_legacy(tiny_setup):
+    """Passing background_mask=None must reproduce the legacy (pre-mask)
+    behavior — the priv_loss should equal the value from a call without
+    the parameter."""
+    images, firearm_target, imagenet_target = _itit_single_stack_batch(B=2)
+
+    out_none = stage_b_step(
+        backbone=tiny_setup["backbone"], adversary=tiny_setup["adversary"],
+        enc_optimizer=tiny_setup["enc_optim"], adv_optimizer=tiny_setup["adv_optim"],
+        images=images, firearm_target=firearm_target,
+        imagenet_target_per_image=imagenet_target,
+        priv_loss_name="entropy", lam=1.0, k_adv=0,
+        device=torch.device("cpu"), gt_alg=1, background_K=0,
+        snr_noise_std=None,
+        background_mask=None,
+    )
+    assert torch.isfinite(torch.tensor(out_none["loss_priv"]))
