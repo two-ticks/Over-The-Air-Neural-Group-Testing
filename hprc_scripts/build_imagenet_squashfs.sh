@@ -22,7 +22,6 @@ TAR_SRC="${TAR_SRC:-/scratch/data/imagenet_prepared.tar}"
 SQSHFS_DST="${SQSHFS_DST:-$SCRATCH/imagenet.sqsh}"
 WORK_DIR="${WORK_DIR:-${TMPDIR:-/tmp}/imagenet_build_$$}"
 COMPRESS="${COMPRESS:-lz4}"
-COMPRESS_LEVEL="${COMPRESS_LEVEL:-9}"
 
 # --- pre-flight ---
 echo "[1/5] Pre-flight checks"
@@ -70,14 +69,11 @@ if (( NUM_TRAIN_WNIDS < 990 )); then
 fi
 
 # --- build squashfs ---
-echo "[3/5] Building squashfs ($COMPRESS, level $COMPRESS_LEVEL) -> $SQSHFS_DST"
+echo "[3/5] Building squashfs ($COMPRESS) -> $SQSHFS_DST"
 echo "    this takes 20-40 minutes; lots of small files to compress"
 
 mkdir -p "$(dirname "$SQSHFS_DST")"
-# -no-progress for cleaner output in slurm logs; remove if you want a progress bar
-mksquashfs "$WORK_DIR/imagenet" "$SQSHFS_DST" \
-    -comp "$COMPRESS" \
-    -no-progress -noappend
+mksquashfs "$WORK_DIR/imagenet" "$SQSHFS_DST" -comp "$COMPRESS" -noappend
 
 # --- verify ---
 echo "[4/5] Verifying squashfs"
