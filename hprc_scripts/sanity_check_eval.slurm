@@ -68,6 +68,7 @@ ARCH="${ARCH:-resnet18}"
 STAGE_C_EPOCHS="${STAGE_C_EPOCHS:-30}"
 LAMS="${LAMS:-0.1 0.3 1.0}"
 PRIV_LOSSES="${PRIV_LOSSES:-ce entropy}"
+STAGE_A_CKPT="${STAGE_A_CKPT:-Trained_Models/StageA_ITIT_ResNet18/model_best.pth.tar}"
 
 nvidia-smi
 
@@ -94,6 +95,17 @@ eval_one () {
         --stage-c-epochs "$STAGE_C_EPOCHS" --batch-size 32 \
         --output_dir "$out_dir"
 }
+
+# Stage A baseline: leakage on the no-privacy-trained encoder. Without this,
+# we can't tell whether Stage B's λ-sweep actually reduces leakage from a
+# baseline X or just produces low absolute numbers (which a 976-way fresh
+# adversary on 30ep training might give regardless of encoder).
+echo "=========================================="
+echo " Stage A baseline (no privacy training) | $(date)"
+echo "=========================================="
+eval_one "$STAGE_A_CKPT" \
+         "Trained_Models/StageC_OnStageA_ITIT_ResNet18_sanity" \
+         "Stage A baseline (no privacy)"
 
 for PL in $PRIV_LOSSES; do
     for LAM in $LAMS; do

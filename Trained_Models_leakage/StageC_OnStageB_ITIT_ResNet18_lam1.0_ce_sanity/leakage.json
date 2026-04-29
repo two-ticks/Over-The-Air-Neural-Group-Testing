@@ -1,0 +1,9 @@
+{
+  "top1_background_acc": 0.02,
+  "top1_firearm_acc": 0.0,
+  "top1_combined_acc": 0.02,
+  "n_background_eval": 150,
+  "n_firearm_eval": 0,
+  "n_combined_eval": 150,
+  "top1_imagenet_acc": 0.02
+}
